@@ -1,0 +1,105 @@
+import numpy as np
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import PolynomialFeatures
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.model_selection import cross_val_score
+
+
+
+class CustomEstimator(BaseEstimator, ClassifierMixin):     
+    def fit(self, X, y):  # using this class for the inheritted properties
+                          # so I can use BaseEstimator, ClassifierMixin for cross validation
+        pass              # do not need to implement it, will use my own functions
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+def cost_function(y, y_pred, lambDa, weights):   # Ein/ cross-entropy/ cost
+    min_value = 1e-16
+    y_pred = np.clip(y_pred, min_value, 1 - min_value)
+    return -np.sum(y * np.log(y_pred) + (1 - y) * np.log(1 - y_pred))
+
+
+def logistic_regression(X, y, num_iterations, learning_rate, lambDa):   
+    N, attributes = X.shape
+    weights = 0.001 + (0.01 - 0.001) * np.random.rand(attributes)   #starting weights with something really small for faster convergence
+    Ein_list = []
+    
+    for i in range(num_iterations):
+        S = np.dot(X, weights.T)
+        y_pred = sigmoid(S)
+        gradient_Ein = np.dot(X.T, (y_pred - y)) / N +  (lambDa/N) * weights   # (regularized) applying the formula, see report 
+
+        weights -= learning_rate * gradient_Ein     #updating weights
+        Ein = cost_function(y, y_pred, lambDa, weights) / N + (lambDa / (2 * N)) * np.sum(weights**2)  #  (regularized) calculating Ein per iteration
+        Ein_list.append(Ein)
+
+
+        percentage = 100 / num_iterations * i           # useful to keep track of the progress(especially for big workload)
+        print(f"Processing: {percentage:.1f}%", end='\r')
+  
+    return weights, Ein_list
+
+def train_test(X, y, num_iterations, learning_rate, lambDa):
+    weights, Ein_list= logistic_regression(X, y, num_iterations, learning_rate, lambDa)
+    S = np.dot(X, weights.T)
+    y_pred = sigmoid(S)
+    prediction = (y_pred >= 0.5).astype(int)
+
+    Eval = 1 - np.mean(prediction == y) # calculating Eval
+    Ein_avg = np.mean(Ein_list)         # Ein mean per each lambda
+    return Eval, Ein_list, Ein_avg
+
+if __name__ == "__main__":
+    data = load_breast_cancer()
+    X = data.data
+    y = data.target
+    
+
+    poly_value = 1
+
+    poly = PolynomialFeatures(poly_value)  #setting the magnitude of the polyFeat
+    X_poly = poly.fit_transform(X)
+
+    lambda_list = [0.1, 0.01, 0.001, 0.0001, 0.00001]
+
+    for i in range(5):   # iterating through each lambda
+        num_iterations = 5000
+        learning_rate = 0.00001
+        lambDa = lambda_list[i]
+
+        custom_estimator = CustomEstimator() # will use this object for my cross_val_score()
+
+        # lists to use for plotting
+        Eval_list = []
+        Ein_fold_avg = []
+        
+        def custom_scoring_function(estimator, X_poly, y):
+            Eval, Ein_list, Ein_avg = train_test(X_poly, y, num_iterations, learning_rate, lambDa)
+            Eval_list.append(Eval)
+            Ein_fold_avg.append(Ein_avg)
+            return Eval
+        #will pass 5 Eout value (1 per fold) to scores
+        scores = cross_val_score(
+            estimator=custom_estimator, X=X_poly, y=y, cv=5, scoring=custom_scoring_function
+        )
+
+        print("Eval scores:", Eval_list) 
+        
+        #plotting once per lambda value
+        plt.plot(range(5), Ein_fold_avg, label=f"Ein",marker='o',markerfacecolor = 'black', color='blue')
+        plt.plot(range(5), Eval_list, label=f"Eout",marker='o',markerfacecolor = 'red', color='pink')
+        for x, z, label in zip(range(5), Ein_fold_avg, Ein_fold_avg):
+            plt.annotate(f'{label:.4f}', (x, z), textcoords="offset points", xytext=(0,10), ha='center')
+        for x, z, label in zip(range(5), Eval_list, Eval_list):
+            plt.annotate(f'{label:.4f}', (x, z), textcoords="offset points", xytext=(0,10), ha='center')
+        plt.xlabel("Folds")
+        plt.ylabel("Ein (Average)")
+        plt.title(f"Avg Ein ({num_iterations} Iterations) for Each Fold (Lambda:{lambDa}||Poly_Features:{poly_value})")
+        plt.legend()
+        # plt.show()
+        plt.savefig(f'Lambda_{lambDa}_Poly-Features_{poly_value}.png', format='png')
+        plt.close()
